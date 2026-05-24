@@ -156,6 +156,7 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0; /* Prevents panel from stretching beyond parent Grid cell height */
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
     transition: border-color 0.3s, box-shadow 0.3s;
 }
@@ -271,6 +272,7 @@ body {
     position: relative;
     display: flex;
     flex-direction: column;
+    min-height: 0; /* Prevents inner textarea from stretching parent panel */
 }
 textarea.code-editor {
     flex: 1;
@@ -304,6 +306,7 @@ textarea.code-editor {
     grid-template-rows: 1fr 1fr;
     gap: 1.5rem;
     height: 100%;
+    min-height: 0; /* Prevents nested panels from expanding past parent Grid boundaries */
 }
 
 /* JSON AST Area */
