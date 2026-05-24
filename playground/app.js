@@ -79,6 +79,15 @@ ELSE
     SET notification_msg = "No se encontraron posts o resultados RAG."
 END`,
 
+    llms_txt: `# 1. Origen de búsqueda de skills
+SET skill_source = "https://img.automators.work"
+
+# 2. Descubrir skills publicadas en llms.txt (Draft v0.4 Spec)
+DISCOVER_SKILLS found_skills = "{{skill_source}}"
+
+# 3. Descargar la primera skill descubierta (placeholder)
+DOWNLOAD_SKILL placeholder_skill = "{{found_skills.0.url}}"`,
+
     conditional: `# Configurar el perfil inicial
 SET user_role = "admin"
 SET target_user = 42

@@ -6,7 +6,9 @@ from .operations import (
     execute_conditional,
     execute_loop,
     execute_semantic_search,
-    execute_mcp_search
+    execute_mcp_search,
+    execute_discover_skills,
+    execute_download_skill
 )
 
 class A2EEngine:
@@ -20,7 +22,9 @@ class A2EEngine:
             "conditional": execute_conditional,
             "loop": execute_loop,
             "semantic_search": execute_semantic_search,
-            "mcp_search": execute_mcp_search
+            "mcp_search": execute_mcp_search,
+            "discover_skills": execute_discover_skills,
+            "download_skill": execute_download_skill
         }
 
     def log(self, message):

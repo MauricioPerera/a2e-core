@@ -184,6 +184,32 @@ class A2ECompiler:
                 })
                 continue
                 
+            # --- 3d. DISCOVER_SKILLS command ---
+            # Format: DISCOVER_SKILLS var_id = "source_url"
+            disc_match = re.match(r'^DISCOVER_SKILLS\s+([a-zA-Z0-9_]+)\s*=\s*(.+)$', line, re.IGNORECASE)
+            if disc_match:
+                var_id = disc_match.group(1).strip()
+                source_url = disc_match.group(2).strip().strip('"').strip("'")
+                current_block.append({
+                    "op": "discover_skills",
+                    "id": var_id,
+                    "source": source_url
+                })
+                continue
+                
+            # --- 3e. DOWNLOAD_SKILL command ---
+            # Format: DOWNLOAD_SKILL var_id = "skill_url"
+            down_match = re.match(r'^DOWNLOAD_SKILL\s+([a-zA-Z0-9_]+)\s*=\s*(.+)$', line, re.IGNORECASE)
+            if down_match:
+                var_id = down_match.group(1).strip()
+                skill_url = down_match.group(2).strip().strip('"').strip("'")
+                current_block.append({
+                    "op": "download_skill",
+                    "id": var_id,
+                    "url": skill_url
+                })
+                continue
+                
             # --- 4. IF / THEN command ---
             # Format: IF condition THEN
             if_match = re.match(r'^IF\s+(.+)\s+THEN$', line, re.IGNORECASE)

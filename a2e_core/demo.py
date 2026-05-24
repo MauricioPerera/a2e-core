@@ -195,5 +195,47 @@ def run_demo():
     print(json.dumps(final_session_doc, indent=2, ensure_ascii=False))
     print("=" * 75)
 
+    # -------------------------------------------------------------------------
+    # 7. LLMS-TXT-SKILLS: Descubrimiento y Descarga de Skills via llms.txt
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 75)
+    print("7. INTEGRACION DE LLMS-TXT-SKILLS (DRAFT V0.4):")
+    print("=" * 75)
+    
+    llms_txt_dsl = """
+    # Paso 1: Configurar origen de busqueda
+    SET skill_source = "https://img.automators.work"
+    
+    # Paso 2: Descubrir skills publicadas en el dominio
+    DISCOVER_SKILLS found_skills = "{{skill_source}}"
+    
+    # Paso 3: Descargar la primera skill encontrada (placeholder.md)
+    DOWNLOAD_SKILL placeholder_skill = "{{found_skills.0.url}}"
+    """
+    
+    try:
+        compiled_llms_txt = compiler.compile(llms_txt_dsl)
+        print("   [OK] Flujo llms.txt compilado correctamente a AST JSON:")
+        print(json.dumps(compiled_llms_txt, indent=2, ensure_ascii=False))
+        
+        print("\n   Ejecutando flujo de llms.txt con el motor A2E...")
+        llms_state = {}
+        llms_engine = A2EEngine(llms_state)
+        llms_final_state = llms_engine.run_workflow(compiled_llms_txt)
+        
+        print("\n   Resultado de la Descarga y Extraccion de la Skill:")
+        skill = llms_final_state.get("placeholder_skill", {})
+        print(f"     - Nombre: {skill.get('name')}")
+        print(f"     - Descripcion: {skill.get('description')}")
+        print(f"     - Version: {skill.get('version')}")
+        print(f"     - Licencia: {skill.get('license')}")
+        print(f"     - Homepage: {skill.get('homepage')}")
+        print(f"     - Contenido Snippet:\n   {skill.get('content')[:160]}...")
+        print("=" * 75)
+        
+    except Exception as e:
+        print(f"Error en flujo de llms.txt: {e}")
+
 if __name__ == "__main__":
     run_demo()
+
