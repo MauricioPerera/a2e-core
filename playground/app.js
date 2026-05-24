@@ -1,6 +1,10 @@
-// A2E Web Playground Application Logic
+// A2E Web Playground Application Logic (ES Module)
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0-alpha.19';
+env.allowLocalModels = false; // Force loading from HF CDN
+
 let pyodideInstance = null;
 let compiledWorkflowJSON = null;
+let extractor = null;
 
 // DSL templates mapping
 const TEMPLATES = {
@@ -103,7 +107,7 @@ btnClearConsole.addEventListener("click", () => {
 });
 
 // Setup mock databases inside Pyodide's virtual filesystem (high-fidelity simulation!)
-function setupVirtualDatabases(pyodide) {
+async function setupVirtualDatabases(pyodide) {
     try {
         // Create simulated folders mirroring the D: drive
         pyodide.FS.mkdir("/D:");
@@ -115,6 +119,34 @@ function setupVirtualDatabases(pyodide) {
         pyodide.FS.mkdir("/D:/.lmstudio/a2e_vector_db/user_notes");
         
         logToTerminal("[System] Montado sistema de archivos virtual síncrono (/D:/.lmstudio/)...", "success");
+
+        // Calculate real 384-D embeddings using Transformers.js in WebGPU/Wasm!
+        logToTerminal("[System] Calculando embeddings de alta dimension (384-D) en WebGPU/Wasm...");
+        
+        let emb1 = [1.0, 0.0, 0.0, 0.0]; // fallback
+        let emb2 = [0.0, 1.0, 0.0, 0.0];
+        let emb3 = [0.0, 0.0, 1.0, 0.0];
+        let embNote = [0.9, 0.1, 0.0, 0.0];
+        let dim = 4;
+        
+        if (extractor) {
+            try {
+                dim = 384;
+                const out1 = await extractor("Protocolo A2E: Agent-to-Execution. Protocolo declarativo para ejecucion de flujos de IA", { pooling: 'mean', normalize: true });
+                const out2 = await extractor("Aceleracion local con Intel Arc y DirectML. Optimizacion de deep learning en tarjetas de video Intel", { pooling: 'mean', normalize: true });
+                const out3 = await extractor("Recetario de cocina italiana tradicional. Secretos para la mejor pasta fresca en casa", { pooling: 'mean', normalize: true });
+                const outNote = await extractor("Notas de Mauricio: Integrar js-vector-store con A2E", { pooling: 'mean', normalize: true });
+                
+                emb1 = Array.from(out1.data);
+                emb2 = Array.from(out2.data);
+                emb3 = Array.from(out3.data);
+                embNote = Array.from(outNote.data);
+                logToTerminal("[System] Embeddings 384-D generados exitosamente via WebGPU/Wasm!", "success");
+            } catch (e) {
+                logToTerminal(`[System Warning] Fallo calculo WebGPU: ${e}. Usando vectores 4D de laboratorio.`, "warning");
+                dim = 4;
+            }
+        }
 
         // Write knowledge_base metadata JSON
         const kbManifest = {
@@ -136,8 +168,8 @@ function setupVirtualDatabases(pyodide) {
                     "summary": "Secretos para la mejor pasta fresca en casa"
                 }
             ],
-            "dim": 4,
-            "model": "gemma-300m-local"
+            "dim": dim,
+            "model": dim === 384 ? "all-MiniLM-L6-v2-webgpu" : "gemma-300m-local"
         };
         pyodide.FS.writeFile(
             "/D:/.lmstudio/a2e_vector_db/knowledge_base/knowledge_base.json",
@@ -145,14 +177,8 @@ function setupVirtualDatabases(pyodide) {
         );
 
         // Write binary Float32 vectors to simulate a real local VectorStore
-        // doc-1: [1.0, 0.0, 0.0, 0.0]
-        // doc-2: [0.0, 1.0, 0.0, 0.0]
-        // doc-3: [0.0, 0.0, 1.0, 0.0]
-        const vectors = new Float32Array([
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0
-        ]);
+        const allVectors = [...emb1, ...emb2, ...emb3];
+        const vectors = new Float32Array(allVectors);
         pyodide.FS.writeFile(
             "/D:/.lmstudio/a2e_vector_db/knowledge_base/knowledge_base.bin",
             new Uint8Array(vectors.buffer)
@@ -167,8 +193,8 @@ function setupVirtualDatabases(pyodide) {
                     "category": "personal"
                 }
             ],
-            "dim": 4,
-            "model": "gemma-300m-local"
+            "dim": dim,
+            "model": dim === 384 ? "all-MiniLM-L6-v2-webgpu" : "gemma-300m-local"
         };
         pyodide.FS.writeFile(
             "/D:/.lmstudio/a2e_vector_db/user_notes/user_notes.json",
@@ -176,10 +202,7 @@ function setupVirtualDatabases(pyodide) {
         );
 
         // Write user_notes binary Float32 vector
-        // note-1: [0.9, 0.1, 0.0, 0.0]
-        const noteVectors = new Float32Array([
-            0.9, 0.1, 0.0, 0.0
-        ]);
+        const noteVectors = new Float32Array(embNote);
         pyodide.FS.writeFile(
             "/D:/.lmstudio/a2e_vector_db/user_notes/user_notes.bin",
             new Uint8Array(noteVectors.buffer)
@@ -194,6 +217,36 @@ function setupVirtualDatabases(pyodide) {
 // Initialize Pyodide WebAssembly Runtime
 async function initPyodide() {
     try {
+        logToTerminal("[System] Cargando pipeline de Hugging Face (all-MiniLM-L6-v2) en WebGPU/Wasm...");
+        loadingText.textContent = "Cargando Modelos de Embeddings (WebGPU)...";
+        
+        let device = "wasm";
+        // Check WebGPU support
+        if (navigator.gpu) {
+            try {
+                const adapter = await navigator.gpu.requestAdapter();
+                if (adapter) {
+                    device = "webgpu";
+                }
+            } catch(e) {}
+        }
+        
+        logToTerminal(`[System] Inicializando Transformers.js pipeline en dispositivo: '${device}'`);
+        
+        try {
+            extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { device: device });
+            logToTerminal("[System] Xenova/all-MiniLM-L6-v2 cargado y cacheado en el navegador.", "success");
+        } catch (e) {
+            logToTerminal(`[System Warning] Fallo al cargar WebGPU pipeline: ${e}. Intentando fallback WASM CPU...`, "warning");
+            try {
+                extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { device: 'wasm' });
+                logToTerminal("[System] Xenova/all-MiniLM-L6-v2 cargado en modo WASM CPU con éxito.", "success");
+            } catch (err) {
+                logToTerminal(`[System Error] No se pudo cargar el extractor de embeddings: ${err}`, "error");
+            }
+        }
+
+        loadingText.textContent = "Inicializando WebAssembly & Python Runtime...";
         logToTerminal("[System] Iniciando descarga de WebAssembly Pyodide Runtime...");
         
         // Boot Pyodide with console capture
@@ -227,13 +280,13 @@ async function initPyodide() {
         }
 
         // Setup databases in MEMFS
-        setupVirtualDatabases(pyodideInstance);
+        await setupVirtualDatabases(pyodideInstance);
 
         // Update status UI
         loadingOverlay.style.opacity = "0";
         setTimeout(() => loadingOverlay.style.display = "none", 500);
         statusDot.classList.add("online");
-        statusText.textContent = "Pyodide: Listo (Wasm)";
+        statusText.textContent = `Pyodide: Listo (Wasm + ${device.toUpperCase()})`;
         btnCompile.disabled = false;
         
         logToTerminal("[System] Entorno WebAssembly A2E listo para compilar y ejecutar.", "success");
@@ -298,7 +351,7 @@ result_json
 });
 
 // Bind run actions
-btnRun.addEventListener("click", () => {
+btnRun.addEventListener("click", async () => {
     if (!compiledWorkflowJSON) {
         logToTerminal("[Error] Primero debes compilar un script DSL válido.", "error");
         return;
@@ -306,23 +359,49 @@ btnRun.addEventListener("click", () => {
 
     logToTerminal("[Engine] Iniciando ejecución del motor A2E en WebAssembly...");
     
+    // Pre-calculate query embeddings using the live local Wasm/WebGPU pipeline!
+    let embeddingsCache = {};
+    if (extractor && compiledWorkflowJSON) {
+        try {
+            const steps = JSON.parse(compiledWorkflowJSON);
+            for (const step of steps) {
+                if (step.op === "semantic_search") {
+                    let queryText = step.query;
+                    if (queryText === "{{rag_query}}") {
+                        queryText = "Como acelerar deep learning localmente con Intel Arc";
+                    }
+                    
+                    logToTerminal(`[WebGPU RAG] Generando vector de embedding en GPU para: '${queryText}'...`);
+                    const output = await extractor(queryText, { pooling: 'mean', normalize: true });
+                    const vector = Array.from(output.data);
+                    embeddingsCache[step.query] = vector;
+                    embeddingsCache[queryText] = vector;
+                    logToTerminal(`[WebGPU RAG] Vector de ${vector.length} dimensiones generado y listo.`, "success");
+                }
+            }
+        } catch (e) {
+            logToTerminal(`[WebGPU Warning] Error al pre-calcular embeddings: ${e}`, "warning");
+        }
+    }
+    
     try {
         pyodideInstance.globals.set("workflow_json", compiledWorkflowJSON);
+        pyodideInstance.globals.set("embeddings_cache_js", pyodideInstance.toPy(embeddingsCache));
         
         const runScript = `
-import sys
-sys.path.append('/')
 import json
 from a2e_core.engine import A2EEngine
 
 # We inject the initialized VectorStore into the engine state so execute_semantic_search works perfectly!
 from a2e_core.vector_store import LocalVectorStore
-v_store = LocalVectorStore(db_dir="/D:/.lmstudio/a2e_vector_db", dim=4)
+dim = 384 if embeddings_cache_js else 4
+v_store = LocalVectorStore(db_dir="/D:/.lmstudio/a2e_vector_db", dim=dim)
 
 initial_state = {
     "vector_store": v_store,
     "vector_db_dir": "/D:/.lmstudio/a2e_vector_db",
-    "doc_db_dir": "/D:/.lmstudio/a2e_db"
+    "doc_db_dir": "/D:/.lmstudio/a2e_db",
+    "__embeddings": dict(embeddings_cache_js) if embeddings_cache_js else {}
 }
 
 engine = A2EEngine(initial_state)

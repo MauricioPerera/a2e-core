@@ -204,9 +204,12 @@ def execute_semantic_search(step, state, engine):
     # Ensure the store dimension is updated if collection dimension differs
     v_store.dim = dim
     
-    # 3. Generate query vector (real LM Studio embeddings or smart mock fallback)
+    # 3. Generate query vector (Check JS pre-computed embeddings first)
     query_vector = None
-    if dim == 4:
+    if state.get("__embeddings") and query_text in state["__embeddings"]:
+        query_vector = state["__embeddings"][query_text]
+        engine.log(f"[WebGPU RAG] Usando embedding pre-calculado via WebGPU (Transformers.js)")
+    elif dim == 4:
         # Smart keyword matching for 4D demo
         q_lower = query_text.lower()
         if any(w in q_lower for w in ["acelerar", "deep learning", "intel", "gpu", "directml"]):
