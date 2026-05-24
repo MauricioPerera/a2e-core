@@ -6,6 +6,52 @@ let pyodideInstance = null;
 let compiledWorkflowJSON = null;
 let extractor = null;
 
+// RAG Documents dataset mirroring a live LocalVectorStore
+let ragDocuments = [
+    {
+        id: "doc-1",
+        title: "Protocolo A2E: Agent-to-Execution",
+        category: "tech",
+        text: "Protocolo A2E: Agent-to-Execution. Protocolo declarativo para ejecucion de flujos de IA",
+        summary: "Protocolo declarativo para ejecucion de flujos de IA",
+        embedding: null
+    },
+    {
+        id: "doc-2",
+        title: "Aceleracion local con Intel Arc y DirectML",
+        category: "tech",
+        text: "Aceleracion local con Intel Arc y DirectML. Optimizacion de deep learning en tarjetas de video Intel",
+        summary: "Optimizacion de deep learning en tarjetas de video Intel",
+        embedding: null
+    },
+    {
+        id: "doc-3",
+        title: "Recetario de cocina italiana tradicional",
+        category: "cooking",
+        text: "Recetario de cocina italiana tradicional. Secretos para la mejor pasta fresca en casa",
+        summary: "Secretos para la mejor pasta fresca en casa",
+        embedding: null
+    }
+];
+
+// User Notes dataset mirroring dynamic personal files
+let userNotes = [
+    {
+        id: "note-1",
+        title: "Notas de Mauricio: Integrar js-vector-store con A2E",
+        category: "personal",
+        text: "Notas de Mauricio: Integrar js-vector-store con A2E",
+        embedding: null
+    }
+];
+
+// Initial user-controlled variables mapped into execution initial_state
+let initialVariables = {
+    target_user: 42,
+    rag_query: "Como acelerar deep learning localmente con Intel Arc",
+    mcp_query: "extraer precios de Amazon"
+};
+
 // DSL templates mapping
 const TEMPLATES = {
     rag_mcp: `# 1. Configurar variables de entrada
@@ -81,6 +127,24 @@ const loadingText = document.getElementById("loadingText");
 const statusDot = document.getElementById("statusDot");
 const statusText = document.getElementById("statusText");
 
+// Left panel Tabs Elements
+const tabBtns = document.querySelectorAll(".tab-btn");
+const tabContents = document.querySelectorAll(".tab-content");
+const dslHeaderActions = document.getElementById("dslHeaderActions");
+
+// Document tab input elements
+const newDocTitle = document.getElementById("newDocTitle");
+const newDocCategory = document.getElementById("newDocCategory");
+const newDocText = document.getElementById("newDocText");
+const btnAddDoc = document.getElementById("btnAddDoc");
+const ragDocsList = document.getElementById("ragDocsList");
+
+// Variables tab input elements
+const newVarKey = document.getElementById("newVarKey");
+const newVarVal = document.getElementById("newVarVal");
+const btnAddVar = document.getElementById("btnAddVar");
+const varsList = document.getElementById("varsList");
+
 // Initialize console logging
 function logToTerminal(message, type = "info") {
     const line = document.createElement("div");
@@ -110,64 +174,82 @@ btnClearConsole.addEventListener("click", () => {
 async function setupVirtualDatabases(pyodide) {
     try {
         // Create simulated folders mirroring the D: drive
-        pyodide.FS.mkdir("/D:");
-        pyodide.FS.mkdir("/D:/.lmstudio");
-        pyodide.FS.mkdir("/D:/.lmstudio/a2e_db");
-        pyodide.FS.mkdir("/D:/.lmstudio/a2e_db/a2e_sessions");
-        pyodide.FS.mkdir("/D:/.lmstudio/a2e_vector_db");
-        pyodide.FS.mkdir("/D:/.lmstudio/a2e_vector_db/knowledge_base");
-        pyodide.FS.mkdir("/D:/.lmstudio/a2e_vector_db/user_notes");
+        const dirs = [
+            "/D:",
+            "/D:/.lmstudio",
+            "/D:/.lmstudio/a2e_db",
+            "/D:/.lmstudio/a2e_db/a2e_sessions",
+            "/D:/.lmstudio/a2e_vector_db",
+            "/D:/.lmstudio/a2e_vector_db/knowledge_base",
+            "/D:/.lmstudio/a2e_vector_db/user_notes"
+        ];
+        
+        for (const dir of dirs) {
+            try {
+                pyodide.FS.mkdir(dir);
+            } catch (e) {
+                // Ignore folder exists error
+            }
+        }
         
         logToTerminal("[System] Montado sistema de archivos virtual síncrono (/D:/.lmstudio/)...", "success");
 
         // Calculate real 384-D embeddings using Transformers.js in WebGPU/Wasm!
-        logToTerminal("[System] Calculando embeddings de alta dimension (384-D) en WebGPU/Wasm...");
-        
-        let emb1 = [1.0, 0.0, 0.0, 0.0]; // fallback
-        let emb2 = [0.0, 1.0, 0.0, 0.0];
-        let emb3 = [0.0, 0.0, 1.0, 0.0];
-        let embNote = [0.9, 0.1, 0.0, 0.0];
         let dim = 4;
+        let hasGPU = false;
         
         if (extractor) {
             try {
                 dim = 384;
-                const out1 = await extractor("Protocolo A2E: Agent-to-Execution. Protocolo declarativo para ejecucion de flujos de IA", { pooling: 'mean', normalize: true });
-                const out2 = await extractor("Aceleracion local con Intel Arc y DirectML. Optimizacion de deep learning en tarjetas de video Intel", { pooling: 'mean', normalize: true });
-                const out3 = await extractor("Recetario de cocina italiana tradicional. Secretos para la mejor pasta fresca en casa", { pooling: 'mean', normalize: true });
-                const outNote = await extractor("Notas de Mauricio: Integrar js-vector-store con A2E", { pooling: 'mean', normalize: true });
+                hasGPU = true;
+                logToTerminal("[System] Verificando y calculando embeddings de alta dimensión (384-D) en WebGPU/Wasm...");
                 
-                emb1 = Array.from(out1.data);
-                emb2 = Array.from(out2.data);
-                emb3 = Array.from(out3.data);
-                embNote = Array.from(outNote.data);
-                logToTerminal("[System] Embeddings 384-D generados exitosamente via WebGPU/Wasm!", "success");
+                // Cache vector for each RAG document
+                for (const doc of ragDocuments) {
+                    if (!doc.embedding) {
+                        logToTerminal(`[WebGPU RAG] Generando vector para: "${doc.title}"...`);
+                        const out = await extractor(doc.text, { pooling: 'mean', normalize: true });
+                        doc.embedding = Array.from(out.data);
+                    }
+                }
+                
+                // Cache vector for each user notes note
+                for (const note of userNotes) {
+                    if (!note.embedding) {
+                        logToTerminal(`[WebGPU RAG] Generando vector para: "${note.title}"...`);
+                        const out = await extractor(note.text, { pooling: 'mean', normalize: true });
+                        note.embedding = Array.from(out.data);
+                    }
+                }
+                logToTerminal("[System] Embeddings 384-D cargados y cacheados exitosamente via WebGPU/Wasm!", "success");
             } catch (e) {
-                logToTerminal(`[System Warning] Fallo calculo WebGPU: ${e}. Usando vectores 4D de laboratorio.`, "warning");
+                logToTerminal(`[System Warning] Fallo cálculo WebGPU: ${e}. Usando vectores 4D de laboratorio.`, "warning");
                 dim = 4;
+                hasGPU = false;
+            }
+        }
+
+        if (!hasGPU) {
+            dim = 4;
+            // Generate deterministic dummy 4D embeddings for offline laboratory tests
+            for (let i = 0; i < ragDocuments.length; i++) {
+                const vec = [0.0, 0.0, 0.0, 0.0];
+                vec[i % 4] = 1.0;
+                ragDocuments[i].embedding = vec;
+            }
+            for (let i = 0; i < userNotes.length; i++) {
+                userNotes[i].embedding = [0.9, 0.1, 0.0, 0.0];
             }
         }
 
         // Write knowledge_base metadata JSON
         const kbManifest = {
-            "ids": ["doc-1", "doc-2", "doc-3"],
-            "meta": [
-                {
-                    "title": "Protocolo A2E: Agent-to-Execution",
-                    "category": "tech",
-                    "summary": "Protocolo declarativo para ejecucion de flujos de IA"
-                },
-                {
-                    "title": "Aceleracion local con Intel Arc y DirectML",
-                    "category": "tech",
-                    "summary": "Optimizacion de deep learning en tarjetas de video Intel"
-                },
-                {
-                    "title": "Recetario de cocina italiana tradicional",
-                    "category": "cooking",
-                    "summary": "Secretos para la mejor pasta fresca en casa"
-                }
-            ],
+            "ids": ragDocuments.map(d => d.id),
+            "meta": ragDocuments.map(d => ({
+                "title": d.title,
+                "category": d.category,
+                "summary": d.summary || d.text.slice(0, 100)
+            })),
             "dim": dim,
             "model": dim === 384 ? "all-MiniLM-L6-v2-webgpu" : "gemma-300m-local"
         };
@@ -177,7 +259,10 @@ async function setupVirtualDatabases(pyodide) {
         );
 
         // Write binary Float32 vectors to simulate a real local VectorStore
-        const allVectors = [...emb1, ...emb2, ...emb3];
+        const allVectors = [];
+        for (const doc of ragDocuments) {
+            allVectors.push(...doc.embedding);
+        }
         const vectors = new Float32Array(allVectors);
         pyodide.FS.writeFile(
             "/D:/.lmstudio/a2e_vector_db/knowledge_base/knowledge_base.bin",
@@ -186,13 +271,11 @@ async function setupVirtualDatabases(pyodide) {
 
         // Write user_notes metadata JSON
         const notesManifest = {
-            "ids": ["note-1"],
-            "meta": [
-                {
-                    "title": "Notas de Mauricio: Integrar js-vector-store con A2E",
-                    "category": "personal"
-                }
-            ],
+            "ids": userNotes.map(n => n.id),
+            "meta": userNotes.map(n => ({
+                "title": n.title,
+                "category": n.category
+            })),
             "dim": dim,
             "model": dim === 384 ? "all-MiniLM-L6-v2-webgpu" : "gemma-300m-local"
         };
@@ -202,13 +285,17 @@ async function setupVirtualDatabases(pyodide) {
         );
 
         // Write user_notes binary Float32 vector
-        const noteVectors = new Float32Array(embNote);
+        const noteVectors = [];
+        for (const note of userNotes) {
+            noteVectors.push(...note.embedding);
+        }
+        const noteVectorsF32 = new Float32Array(noteVectors);
         pyodide.FS.writeFile(
             "/D:/.lmstudio/a2e_vector_db/user_notes/user_notes.bin",
-            new Uint8Array(noteVectors.buffer)
+            new Uint8Array(noteVectorsF32.buffer)
         );
 
-        logToTerminal("[System] Cargadas bases de datos vectoriales y manifiestos de la Trinidad en WebAssembly.", "success");
+        logToTerminal(`[System] Sincronizados y montados ${ragDocuments.length} documentos y ${userNotes.length} notas en el VectorStore virtual.`, "success");
     } catch (e) {
         logToTerminal(`[System Error] Error al configurar el FS virtual: ${e}`, "error");
     }
@@ -282,6 +369,10 @@ async function initPyodide() {
         // Setup databases in MEMFS
         await setupVirtualDatabases(pyodideInstance);
 
+        // Initial rendering
+        renderRagDocs();
+        renderVariables();
+
         // Update status UI
         loadingOverlay.style.opacity = "0";
         setTimeout(() => loadingOverlay.style.display = "none", 500);
@@ -297,6 +388,169 @@ async function initPyodide() {
     }
 }
 
+// Tab Switching Logic
+tabBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+        const tabId = btn.getAttribute("data-tab");
+        
+        tabBtns.forEach(b => b.classList.remove("active"));
+        tabContents.forEach(c => c.classList.remove("active"));
+        
+        btn.classList.add("active");
+        document.getElementById(tabId).classList.add("active");
+        
+        // Hide/Show compiler/template headers
+        if (tabId === "dslTabContent") {
+            dslHeaderActions.style.display = "block";
+        } else {
+            dslHeaderActions.style.display = "none";
+        }
+    });
+});
+
+// Render dynamic RAG documents
+function renderRagDocs() {
+    ragDocsList.innerHTML = "";
+    if (ragDocuments.length === 0) {
+        ragDocsList.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);text-align:center;padding:1rem;">Base vacía. Agrega documentos arriba.</div>`;
+        return;
+    }
+    
+    ragDocuments.forEach(doc => {
+        const card = document.createElement("div");
+        card.classList.add("doc-card");
+        
+        const catClass = doc.category === "tech" ? "tech" : (doc.category === "cooking" ? "personal" : "other");
+        
+        card.innerHTML = `
+            <div class="doc-card-header">
+                <span class="doc-card-title">${doc.title}</span>
+                <button class="btn-delete-icon" data-id="${doc.id}">
+                    🗑️ Borrar
+                </button>
+            </div>
+            <div class="doc-card-body">${doc.text}</div>
+            <div class="doc-card-footer">
+                <span class="tag-cat ${catClass}">${doc.category}</span>
+                <span class="tag-cat other" style="font-size:0.6rem;opacity:0.8;">384-D Vector</span>
+            </div>
+        `;
+        
+        // Bind delete document action
+        card.querySelector(".btn-delete-icon").addEventListener("click", async () => {
+            logToTerminal(`[System] Eliminando documento "${doc.title}" del VectorStore...`);
+            ragDocuments = ragDocuments.filter(d => d.id !== doc.id);
+            await setupVirtualDatabases(pyodideInstance);
+            renderRagDocs();
+        });
+        
+        ragDocsList.appendChild(card);
+    });
+}
+
+// Add new RAG Document
+btnAddDoc.addEventListener("click", async () => {
+    const title = newDocTitle.value.trim();
+    const text = newDocText.value.trim();
+    const category = newDocCategory.value.trim() || "tech";
+    
+    if (!title || !text) {
+        logToTerminal("[Error] Título y contenido de texto requeridos para indexar.", "error");
+        return;
+    }
+    
+    btnAddDoc.disabled = true;
+    btnAddDoc.textContent = "Calculando embeddings en GPU...";
+    logToTerminal(`[WebGPU] Indexando nuevo documento: "${title}"...`);
+    
+    try {
+        const newDoc = {
+            id: `doc-${Date.now()}`,
+            title: title,
+            category: category,
+            text: text,
+            summary: text.slice(0, 100),
+            embedding: null
+        };
+        
+        // Push and let setupVirtualDatabases calculate the embedding
+        ragDocuments.push(newDoc);
+        await setupVirtualDatabases(pyodideInstance);
+        
+        // Clear inputs
+        newDocTitle.value = "";
+        newDocText.value = "";
+        newDocCategory.value = "";
+        
+        renderRagDocs();
+        logToTerminal(`[System] Nuevo documento "${title}" agregado y vectorizado con éxito en tu GPU!`, "success");
+    } catch(e) {
+        logToTerminal(`[Error] Fallo al agregar documento: ${e}`, "error");
+    } finally {
+        btnAddDoc.disabled = false;
+        btnAddDoc.textContent = "➕ Indexar y Vectorizar via WebGPU";
+    }
+});
+
+// Render dynamic variables
+function renderVariables() {
+    varsList.innerHTML = "";
+    const entries = Object.entries(initialVariables);
+    
+    if (entries.length === 0) {
+        varsList.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);text-align:center;padding:1rem;">Sin variables. Agrega variables de estado arriba.</div>`;
+        return;
+    }
+    
+    entries.forEach(([key, val]) => {
+        const row = document.createElement("div");
+        row.classList.add("var-row");
+        
+        row.innerHTML = `
+            <span class="var-key">${key}</span>
+            <span class="var-val">${val}</span>
+            <button class="btn-delete-icon" data-key="${key}">
+                🗑️
+            </button>
+        `;
+        
+        // Bind delete variable action
+        row.querySelector(".btn-delete-icon").addEventListener("click", () => {
+            logToTerminal(`[System] Eliminada variable "${key}"`);
+            delete initialVariables[key];
+            renderVariables();
+        });
+        
+        varsList.appendChild(row);
+    });
+}
+
+// Add state Variable
+btnAddVar.addEventListener("click", () => {
+    const key = newVarKey.value.trim().replace(/[^a-zA-Z0-9_]/g, "");
+    const val = newVarVal.value.trim();
+    
+    if (!key || !val) {
+        logToTerminal("[Error] Nombre y valor de variable requeridos. Nombre debe ser alfanumérico.", "error");
+        return;
+    }
+    
+    // Auto-parse values to clean types (bools, numbers, or fallback strings)
+    let parsedVal = val;
+    if (val.toLowerCase() === "true") parsedVal = true;
+    else if (val.toLowerCase() === "false") parsedVal = false;
+    else if (!isNaN(val) && val !== "") parsedVal = Number(val);
+    
+    initialVariables[key] = parsedVal;
+    
+    // Clear inputs
+    newVarKey.value = "";
+    newVarVal.value = "";
+    
+    renderVariables();
+    logToTerminal(`[System] Añadida variable "${key}" = "${val}"`, "success");
+});
+
 // Bind compile actions
 btnCompile.addEventListener("click", () => {
     const dslCode = codeEditor.value.trim();
@@ -309,10 +563,8 @@ btnCompile.addEventListener("click", () => {
     
     try {
         // Execute compilation in Python
-        // Clean outputs
         jsonViewer.textContent = "// Compilando...";
         
-        // Escaping python strings safely
         pyodideInstance.globals.set("dsl_input", dslCode);
         
         const compileScript = `
@@ -367,8 +619,13 @@ btnRun.addEventListener("click", async () => {
             for (const step of steps) {
                 if (step.op === "semantic_search") {
                     let queryText = step.query;
-                    if (queryText === "{{rag_query}}") {
-                        queryText = "Como acelerar deep learning localmente con Intel Arc";
+                    
+                    // Resolve templates in queryText using the live variable state in JavaScript!
+                    if (queryText.startsWith("{{") && queryText.endsWith("}}")) {
+                        const varName = queryText.slice(2, -2).trim();
+                        if (initialVariables[varName] !== undefined) {
+                            queryText = String(initialVariables[varName]);
+                        }
                     }
                     
                     logToTerminal(`[WebGPU RAG] Generando vector de embedding en GPU para: '${queryText}'...`);
@@ -387,6 +644,7 @@ btnRun.addEventListener("click", async () => {
     try {
         pyodideInstance.globals.set("workflow_json", compiledWorkflowJSON);
         pyodideInstance.globals.set("embeddings_cache_js", pyodideInstance.toPy(embeddingsCache));
+        pyodideInstance.globals.set("initial_variables_json", JSON.stringify(initialVariables));
         
         const runScript = `
 import json
@@ -397,12 +655,18 @@ from a2e_core.vector_store import LocalVectorStore
 dim = 384 if embeddings_cache_js else 4
 v_store = LocalVectorStore(db_dir="/D:/.lmstudio/a2e_vector_db", dim=dim)
 
+# Base state with database directories and embeddings cache
 initial_state = {
     "vector_store": v_store,
     "vector_db_dir": "/D:/.lmstudio/a2e_vector_db",
     "doc_db_dir": "/D:/.lmstudio/a2e_db",
     "__embeddings": dict(embeddings_cache_js) if embeddings_cache_js else {}
 }
+
+# Merge all user variables dynamically from JavaScript!
+vars_dict = json.loads(initial_variables_json)
+for k, v in vars_dict.items():
+    initial_state[k] = v
 
 engine = A2EEngine(initial_state)
 compiled_workflow = json.loads(workflow_json)

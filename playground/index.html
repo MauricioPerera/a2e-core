@@ -45,17 +45,16 @@
     <!-- Main Workspace Container -->
     <main class="playground-container">
         
-        <!-- Left Panel: DSL Editor -->
+        <!-- Left Panel: A2E Tabbed Workspace -->
         <section class="panel">
             <div class="panel-header">
-                <h2 class="panel-title">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                    </svg>
-                    DSL Workflow Editor
-                </h2>
+                <div class="tab-navigation-header">
+                    <button class="tab-btn active" data-tab="dslTabContent">📝 Editor DSL</button>
+                    <button class="tab-btn" data-tab="ragTabContent">🗂️ Base RAG</button>
+                    <button class="tab-btn" data-tab="varsTabContent">⚙️ Variables</button>
+                </div>
                 
-                <div class="panel-actions">
+                <div class="panel-actions" id="dslHeaderActions">
                     <select id="templateSelector" class="btn-select" aria-label="Seleccionar plantilla de flujo">
                         <option value="rag_mcp">Trinity: RAG Semántico + MCP Search</option>
                         <option value="conditional">MongoDB Filtro + Condicional</option>
@@ -65,22 +64,76 @@
             </div>
             
             <div class="editor-container">
-                <textarea id="codeEditor" class="code-editor" spellcheck="false" autocomplete="off" placeholder="# Escribe tu DSL de A2E aquí..."></textarea>
-                
-                <div class="editor-footer">
-                    <button id="btnCompile" class="btn-secondary" disabled>
-                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
-                        </svg>
-                        Compilar DSL
-                    </button>
-                    <button id="btnRun" class="btn-primary" disabled>
-                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        Ejecutar Flujo
-                    </button>
+                <!-- Tab 1: DSL Code Editor -->
+                <div id="dslTabContent" class="tab-content active">
+                    <textarea id="codeEditor" class="code-editor" spellcheck="false" autocomplete="off" placeholder="# Escribe tu DSL de A2E aquí..."></textarea>
+                    
+                    <div class="editor-footer">
+                        <button id="btnCompile" class="btn-secondary" disabled>
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
+                            </svg>
+                            Compilar DSL
+                        </button>
+                        <button id="btnRun" class="btn-primary" disabled>
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Ejecutar Flujo
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tab 2: RAG Database Manager -->
+                <div id="ragTabContent" class="tab-content">
+                    <div class="tab-inner-scroll">
+                        <div class="rag-form-section">
+                            <h3 class="tab-section-title">Agregar Documento a la Base de Conocimiento RAG</h3>
+                            <div class="form-row">
+                                <input type="text" id="newDocTitle" class="form-input" placeholder="Título del documento..." autocomplete="off">
+                                <input type="text" id="newDocCategory" class="form-input" placeholder="Categoría (ej: tech, personal)..." autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <textarea id="newDocText" class="form-textarea" placeholder="Contenido de texto que será vectorizado a 384 dimensiones en tu GPU..."></textarea>
+                            </div>
+                            <div class="form-actions-row">
+                                <button id="btnAddDoc" class="btn-primary" style="padding: 0.5rem 1.2rem; font-size: 0.85rem;">
+                                    ➕ Indexar y Vectorizar via WebGPU
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="rag-list-section">
+                            <h3 class="tab-section-title">Documentos Indexados en MEMFS Virtual</h3>
+                            <div id="ragDocsList" class="rag-docs-list">
+                                <!-- Populated dynamically by app.js -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: Execution Variables -->
+                <div id="varsTabContent" class="tab-content">
+                    <div class="tab-inner-scroll">
+                        <div class="vars-form-section">
+                            <h3 class="tab-section-title">Añadir Variable de Estado</h3>
+                            <div class="form-row">
+                                <input type="text" id="newVarKey" class="form-input" placeholder="Nombre (ej: target_user)..." autocomplete="off">
+                                <input type="text" id="newVarVal" class="form-input" placeholder="Valor (ej: 42)..." autocomplete="off">
+                                <button id="btnAddVar" class="btn-secondary" style="padding: 0.5rem 1rem; font-size: 0.85rem;">
+                                    ➕ Añadir
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="vars-list-section">
+                            <h3 class="tab-section-title">Variables del Estado Inicial (Inyectadas al Motor)</h3>
+                            <div id="varsList" class="vars-list">
+                                <!-- Populated dynamically by app.js -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
