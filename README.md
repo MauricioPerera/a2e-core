@@ -75,7 +75,7 @@ Ejecutando la suite de pruebas local sobre disco de almacenamiento sólido y pro
 ## 📂 Estructura del Repositorio
 
 ```text
-ml-finetuning/
+a2e-core/
 ├── .gitignore
 ├── README.md
 ├── test_qwen.py         # Script de pruebas con Qwen 2.5 0.5B local
