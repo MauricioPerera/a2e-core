@@ -424,6 +424,22 @@ def handle_mock_api(url, method, body):
 
 # --- llms-txt-skills Executors (Draft v0.4 Spec) ---
 
+def fetch_url_text(url):
+    # Try using Pyodide's built-in open_url for synchronous fetch in the browser context
+    try:
+        from pyodide.http import open_url
+        with open_url(url) as response:
+            return response.read()
+    except (ImportError, ModuleNotFoundError):
+        # Fallback to standard urllib when running under native Python
+        import urllib.request
+        req = urllib.request.Request(
+            url, 
+            headers={"User-Agent": "A2E-Agent/1.0.0"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
 def execute_discover_skills(step, state, engine):
     import urllib.request
     import urllib.parse
@@ -454,76 +470,71 @@ def execute_discover_skills(step, state, engine):
         engine.log(f"[llms.txt Spec] Usando mock local para {origin}/llms.txt")
     else:
         try:
-            req = urllib.request.Request(
-                llms_txt_url, 
-                headers={"User-Agent": "A2E-Agent/1.0.0"}
+            text = fetch_url_text(llms_txt_url)
+            
+            # Check for ## Skills section (case-insensitive)
+            lines = text.splitlines()
+            in_skills_section = False
+            skill_lines = []
+            
+            for line in lines:
+                stripped = line.strip()
+                if re.match(r"^##\s+skills\s*$", stripped, re.IGNORECASE):
+                    in_skills_section = True
+                    continue
+                if in_skills_section and re.match(r"^##\s+", stripped, re.IGNORECASE):
+                    break
+                if in_skills_section:
+                    skill_lines.append(line)
+            
+            # Parse list items
+            current_item = []
+            parsed_items = []
+            for line in skill_lines:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if stripped.startswith("- "):
+                    if current_item:
+                        parsed_items.append("\n".join(current_item))
+                    current_item = [stripped]
+                else:
+                    if current_item:
+                        current_item.append(stripped)
+            if current_item:
+                parsed_items.append("\n".join(current_item))
+            
+            # RegEx pattern matching Draft v0.4 Spec list structure:
+            # - [title](url): description <!-- skill: {...} -->
+            pattern = re.compile(
+                r"^-\s*\[([^\]]+)\]\s*\(((?:[^()]|\([^)]*\))*)\)\s*:\s*(.+?)(?:\s*<!--\s*skill:\s*(\{.*?\})\s*-->)?$",
+                re.DOTALL | re.IGNORECASE
             )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                text = resp.read().decode("utf-8", errors="replace")
-                
-                # Check for ## Skills section (case-insensitive)
-                lines = text.splitlines()
-                in_skills_section = False
-                skill_lines = []
-                
-                for line in lines:
-                    stripped = line.strip()
-                    if re.match(r"^##\s+skills\s*$", stripped, re.IGNORECASE):
-                        in_skills_section = True
-                        continue
-                    if in_skills_section and re.match(r"^##\s+", stripped, re.IGNORECASE):
-                        break
-                    if in_skills_section:
-                        skill_lines.append(line)
-                
-                # Parse list items
-                current_item = []
-                parsed_items = []
-                for line in skill_lines:
-                    stripped = line.strip()
-                    if not stripped:
-                        continue
-                    if stripped.startswith("- "):
-                        if current_item:
-                            parsed_items.append("\n".join(current_item))
-                        current_item = [stripped]
-                    else:
-                        if current_item:
-                            current_item.append(stripped)
-                if current_item:
-                    parsed_items.append("\n".join(current_item))
-                
-                # RegEx pattern matching Draft v0.4 Spec list structure:
-                # - [title](url): description <!-- skill: {...} -->
-                pattern = re.compile(
-                    r"^-\s*\[([^\]]+)\]\s*\(((?:[^()]|\([^)]*\))*)\)\s*:\s*(.+?)(?:\s*<!--\s*skill:\s*(\{.*?\})\s*-->)?$",
-                    re.DOTALL | re.IGNORECASE
-                )
-                
-                for raw_item in parsed_items:
-                    m = pattern.match(raw_item.strip())
-                    if m:
-                        title = m.group(1).strip()
-                        skill_url = m.group(2).strip()
-                        desc = m.group(3).strip()
-                        meta_raw = m.group(4)
-                        
-                        # Resolve relative URLs against the origin base
-                        resolved_url = urllib.parse.urljoin(llms_txt_url, skill_url)
-                        
-                        skill_dict = {
-                            "title": title,
-                            "url": resolved_url,
-                            "description": desc
-                        }
-                        if meta_raw:
-                            try:
-                                skill_dict["metadata"] = json.loads(meta_raw)
-                            except:
-                                skill_dict["metadata_raw"] = meta_raw
-                        
-                        skills.append(skill_dict)
-                fetched = True
+            
+            for raw_item in parsed_items:
+                m = pattern.match(raw_item.strip())
+                if m:
+                    title = m.group(1).strip()
+                    skill_url = m.group(2).strip()
+                    desc = m.group(3).strip()
+                    meta_raw = m.group(4)
+                    
+                    # Resolve relative URLs against the origin base
+                    resolved_url = urllib.parse.urljoin(llms_txt_url, skill_url)
+                    
+                    skill_dict = {
+                        "title": title,
+                        "url": resolved_url,
+                        "description": desc
+                    }
+                    if meta_raw:
+                        try:
+                            skill_dict["metadata"] = json.loads(meta_raw)
+                        except:
+                            skill_dict["metadata_raw"] = meta_raw
+                    
+                    skills.append(skill_dict)
+            fetched = True
                 
         except Exception as e:
             # Fallback to mock skill in case of network timeout/offline mode
@@ -566,37 +577,32 @@ def execute_download_skill(step, state, engine):
         engine.log(f"[llms.txt Spec] Usando mock local para descarga de skill en: {url}")
     else:
         try:
-            req = urllib.request.Request(
-                url, 
-                headers={"User-Agent": "A2E-Agent/1.0.0"}
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                raw_md = resp.read().decode("utf-8", errors="replace")
-                
-                # Parse Frontmatter YAML (simple native zero-dependency key-value parser)
-                metadata = {}
-                content = raw_md
-                
-                if raw_md.strip().startswith("---"):
-                    parts = raw_md.split("---", 2)
-                    if len(parts) >= 3:
-                        frontmatter_text = parts[1]
-                        content = parts[2].strip()
-                        
-                        for line in frontmatter_text.splitlines():
-                            if ":" in line:
-                                k, v = line.split(":", 1)
-                                metadata[k.strip()] = v.strip().strip('"').strip("'")
-                
-                skill_data = {
-                    "name": metadata.get("name", ""),
-                    "description": metadata.get("description", ""),
-                    "version": metadata.get("version", "1.0.0"),
-                    "license": metadata.get("license", "MIT"),
-                    "homepage": metadata.get("homepage", ""),
-                    "content": content
-                }
-                fetched = True
+            raw_md = fetch_url_text(url)
+            
+            # Parse Frontmatter YAML (simple native zero-dependency key-value parser)
+            metadata = {}
+            content = raw_md
+            
+            if raw_md.strip().startswith("---"):
+                parts = raw_md.split("---", 2)
+                if len(parts) >= 3:
+                    frontmatter_text = parts[1]
+                    content = parts[2].strip()
+                    
+                    for line in frontmatter_text.splitlines():
+                        if ":" in line:
+                            k, v = line.split(":", 1)
+                            metadata[k.strip()] = v.strip().strip('"').strip("'")
+            
+            skill_data = {
+                "name": metadata.get("name", ""),
+                "description": metadata.get("description", ""),
+                "version": metadata.get("version", "1.0.0"),
+                "license": metadata.get("license", "MIT"),
+                "homepage": metadata.get("homepage", ""),
+                "content": content
+            }
+            fetched = True
                 
         except Exception as e:
             # Fallback to mock on connection timeout
